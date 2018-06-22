@@ -4,7 +4,7 @@ from action import Action
 class Up(Action):
 
     def run(self):
-        print "Up run"
+        print("Up run")
 
     def __diff_to_current(self, dependencies):
         # TODO - Return list of dependencies which need to be fetched
@@ -19,5 +19,5 @@ class Up(Action):
         return
 
     def __output_results(self, depresults):
-        print 'Done'
+        print('Done')
     

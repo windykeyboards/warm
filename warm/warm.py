@@ -18,7 +18,7 @@ Usage:
 
 # We expect 2 - one for the name, one for the action to take
 if len(sys.argv) < 2:
-    print help_message
+    print(help_message)
     quit()
 
 action = None
@@ -33,8 +33,8 @@ elif sys.argv[1] == 'this':
 
 # Run the action if not none, else print the help message
 if action == None:
-    print 'Unknown argument: %s' % sys.argv[1]
-    print help_message
+    print('Unknown argument: %s' % sys.argv[1])
+    print(help_message)
 else:
     action.run()
 
