@@ -1,0 +1,7 @@
+# Python Byte-compiled or optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Random macOS things
+.DS_Store
