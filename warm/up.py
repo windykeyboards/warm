@@ -2,6 +2,7 @@ from action import Action
 from collections import namedtuple
 import log
 import os
+from subprocess import check_output
 
 # Named tuple defining a dependency 
 # TODO - Upgrade to dataclass when moving to Python 3.7
@@ -60,7 +61,7 @@ class Up(Action):
                 # In future we can support more than just github. For now, hardcode a git https url
                 git_url = "https://github.com/{owner}/{repo}.git".format(owner = owner, repo = repo_name)
 
-                parsed_version = self.__parse_version(raw_version)
+                parsed_version = self.__parse_version(git_url, raw_version)
 
                 if parsed_version is None:
                     log.info("Malformed version on line {line}").format(line = line_number + 1)
@@ -80,7 +81,7 @@ class Up(Action):
         log.info("Found {0} dependencies for the current project".format(len(all_deps)))
         return all_deps
 
-    def __parse_version(self, raw_version):
+    def __parse_version(self, remote_url, raw_version):
         # TODO - Parse raw version into either: 1) Git tag/version; 2) Commit hash 3) Git branch 4) Latest version
 
         # If the dependency contains a plus, return the latest version
@@ -92,7 +93,24 @@ class Up(Action):
         
         # For branch, hash or tag we're going to need to pull the empty repo and look for it
 
+        # git clone --bare remote_url
+        # cd remote_url.split('/').last
 
+        # Check for commit
+        # out = git rev-list
+        # out.contains(raw_version)
+
+        # Check for branch
+        # out = git branch
+        # out.contains(raw_version)
+
+        # Check for tag
+        # out = git tag --list
+        # out.contains(raw_version)
+
+        # Delete git dir
+
+        # Return None if not recognized.
         return {}
 
     def __parse_stay_file(self):
