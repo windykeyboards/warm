@@ -5,3 +5,6 @@ __pycache__/
 
 # Random macOS things
 .DS_Store
+
+# VS code
+.vscode
