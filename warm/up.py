@@ -201,7 +201,24 @@ class Up(Action):
     def __download_and_apply(self, dependency):
         # TODO - Download given dependency, parse warm file and move files to the right place
         # NOTE - a .warm_dependency file needs to be generated in the root of the library
-        return
+        starting_dir = os.getcwd()
+
+        with TemporaryDirectory() as tempdir:
+            result = self.__call("git clone {remote} {dir}".format(remote = dependency.git_url, dir = tempdir))
+
+            if result is not 0:
+                return {
+                    "success": False,
+                    "reason": "Git clone failed"
+                }
+
+            os.chdir(os.path.join(tempdir, dependency.name))
+
+        os.chdir(starting_dir)
+
+        return {
+            "success": True
+        }
 
     def __output_results(self, depresults):
         print('Done')
