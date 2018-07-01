@@ -5,6 +5,7 @@ import os
 from subprocess import check_output, call
 from dataclasses import dataclass
 from tempfile import TemporaryDirectory
+from pathlib import Path
 
 @dataclass
 class Dependency:
@@ -19,11 +20,65 @@ class Up(Action):
 
     def run(self):
         log.print_action_header("up")
+
+        # Read all dependencies and validate
         all_deps = self.__parse_dependencies()
 
+        # Check to see which differ
+        deps_to_sync = self.__diff_to_current(all_deps)
+
+        # Sync dependencies
+        for dependency in deps_to_sync:
+            self.__download_and_apply(dependency)
+
+
     def __diff_to_current(self, dependencies):
-        # TODO - Return list of dependencies which need to be fetched
-        return []
+        arduino_dir = os.environ["ARDUINO_DIR"]
+
+        if arduino_dir is None:
+            log.fatal("No ARDUINO_DIR environment variable set")
+
+        arduino_lib_path = os.join(arduino_dir, "libraries")
+
+        current_dir = os.getcwd()
+
+        unsynced_dependencies = []
+
+        for depedency in dependencies:
+            # Move to the arduino library directory
+            os.chdir(arduino_lib_path)
+
+            dependency_path = Path(os.join(os.getcwd(), dependency.name))
+
+            # Short-circuit if the path doesn't exist
+            if not dependency_path.exists():
+                unsynced_dependencies.append(depedency)
+                continue
+
+            # If it's a directory, we need to check the version
+            if dependency_path.is_dir():
+                # Look for the .warm_dependency - file describing the current revision
+                warm_path = os.join(str(dependency_path), ".warm_dependency")
+
+                if not Path(warm_path).exists():
+                    unsynced_dependencies.append(depedency)
+                    continue
+                else:
+                    # Read in the file to determine revision. This is a data class serialised.
+                    # Note the uncautious use of eval here. This file only ever exists on the 
+                    # users machine, so if they decide to inject malicious code then it's only 
+                    # affecting themselves.
+                    with open(warm_path) as warm_properties:
+                        current_dep = eval(warm_properties.read())
+
+                        if current_dep is not depedency:
+                            unsynced_dependencies.append(depedency)
+                            continue
+
+        # Back to where we started
+        os.chdir(current_dir)
+                
+        return unsynced_dependencies
 
     def __parse_dependencies(self):
         # Look for dependencies.warm in current directory
@@ -34,7 +89,6 @@ class Up(Action):
 
         if dep_file is None:
             log.fatal("Can't find dependencies.warm in the current directory - is it named properly?")
-            quit()
 
         log.info("Found dependency file")
 
@@ -54,7 +108,7 @@ class Up(Action):
                     # The format of a dependency is as follows:
                     #
                     #                   windykeyboards/butt-in: 1.0
-                    # [org or owner name] / [repo name] : [tag | commit hash | branch] 
+                    # [org or owner name] / [repo name] : [tag | commit hash | branch | plus] 
                     #
                     # The following reads each dependency, detects version type, and constructs a 
                     # named tuple describing the dependency.
@@ -92,8 +146,6 @@ class Up(Action):
         return all_deps
 
     def __parse_version(self, remote_url, raw_version, resolving_dir):
-        # TODO - Parse raw version into either: 1) Git tag/version; 2) Commit hash 3) Git branch 4) Latest version
-
         # If the dependency contains a plus, return the latest version
         if '+' in raw_version:
             return {
@@ -111,10 +163,10 @@ class Up(Action):
         result = self.__call("git clone --bare {url} {temp_path}".format(url = remote_url, temp_path = clone_path), check_result = False)
 
         if result is not 0:
-            log.warn("No valid repo found at {0}. Does it look right? Are you connected to the internet?".format(remote_url))
+            log.warn("No valid repo found at {remote}. Does it look right? Are you connected to the internet?".format(remote = remote_url))
             return None
 
-        # Change to the cloned dir for running the following command
+        # Change to the cloned dir for running the following commands
         os.chdir(clone_path)
 
         # Clean version
@@ -146,12 +198,9 @@ class Up(Action):
 
         return None
 
-    def __parse_stay_file(self):
-        # TODO - Read stay file to get locked dependency versions
-        return []
-
     def __download_and_apply(self, dependency):
         # TODO - Download given dependency, parse warm file and move files to the right place
+        # NOTE - a .warm_dependency file needs to be generated in the root of the library
         return
 
     def __output_results(self, depresults):
