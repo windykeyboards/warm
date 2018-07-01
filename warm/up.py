@@ -20,7 +20,6 @@ class Up(Action):
     def run(self):
         log.print_action_header("up")
         all_deps = self.__parse_dependencies()
-        print(all_deps)
 
     def __diff_to_current(self, dependencies):
         # TODO - Return list of dependencies which need to be fetched
@@ -106,6 +105,9 @@ class Up(Action):
         git_name = remote_url.split('/')[-1]
         clone_path = os.path.join(resolving_dir, git_name)
 
+        header = "Cloning and parsing dependency for {name}".format(name = git_name.replace('.git', ''))
+        log.print_subaction_header(header)
+
         result = self.__call("git clone --bare {url} {temp_path}".format(url = remote_url, temp_path = clone_path), check_result = False)
 
         if result is not 0:
@@ -156,7 +158,10 @@ class Up(Action):
         print('Done')
 
     def __call(self, command, check_result = True):
-        log.info(command)
+        print("")
+        log.command(command)
+        print("")
+
         if check_result:
             return check_output(command, shell = True).decode('utf-8')
         else:
