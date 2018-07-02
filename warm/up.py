@@ -43,6 +43,7 @@ class Up(Action):
         self.__output_results(results)
 
     def __diff_to_current(self, dependencies):
+        """Calculated the diff of the parsed dependencies to the current dependencies""" 
         arduino_dir = os.environ["ARDUINO_DIR"]
 
         if arduino_dir is None:
@@ -91,6 +92,7 @@ class Up(Action):
         return unsynced_dependencies
 
     def __parse_dependencies(self):
+        """Parse the dependency file and return a list of all found dependencies"""
         # Look for dependencies.warm in current directory
         log.info("Looking in the current directory for dependencies.warm")
 
@@ -136,7 +138,7 @@ class Up(Action):
                     parsed_version = self.__parse_version(git_url, raw_version, tempdir)
 
                     if parsed_version is None:
-                        log.info("Malformed version on line {line}").format(line = line_number + 1)
+                        log.warn("Malformed version on line {line}".format(line = line_number + 1))
                         continue
 
                     version_type = parsed_version["type"]
@@ -156,6 +158,7 @@ class Up(Action):
         return all_deps
 
     def __parse_version(self, remote_url, raw_version, resolving_dir):
+        """Parses the version of a particular dependency and validates it"""
         # If the dependency contains a plus, return the latest version
         if '+' in raw_version:
             return {
@@ -192,7 +195,11 @@ class Up(Action):
 
         # Check for branch
         out = self.__call("git branch").split('\n')
-        if version in out:
+
+        # Remove selected branch prefix
+        mapped_output = list(map(lambda branch: branch.replace("*", "").strip(), out))
+
+        if version in mapped_output:
             return {
                 "type": "branch",
                 "version": version
@@ -209,8 +216,7 @@ class Up(Action):
         return None
 
     def __download_and_apply(self, dependency):
-        # TODO - Download given dependency, parse warm file and move files to the right place
-        # NOTE - a .warm_dependency file needs to be generated in the root of the library
+        """Downloads the input dependency and moves it to the ARDUINO_DIR"""
         starting_dir = os.getcwd()
 
         with TemporaryDirectory() as tempdir:
@@ -296,6 +302,7 @@ class Up(Action):
         }
 
     def __output_results(self, results):
+        """Prints to the console the results of the up action"""
         successful_results = 0
         failure_results = []
 
@@ -327,6 +334,7 @@ class Up(Action):
             
 
     def __call(self, command, check_result = True):
+        """Util function for calling commands and printing them nicely"""
         print("")
         log.command(command)
         print("")
