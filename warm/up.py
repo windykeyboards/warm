@@ -6,6 +6,7 @@ from subprocess import check_output, call
 from dataclasses import dataclass
 from tempfile import TemporaryDirectory
 from pathlib import Path
+import shutil
 
 @dataclass
 class Dependency:
@@ -25,12 +26,21 @@ class Up(Action):
         all_deps = self.__parse_dependencies()
 
         # Check to see which differ
+        log.print_subaction_header("Diffing dependencies to current")
         deps_to_sync = self.__diff_to_current(all_deps)
 
         # Sync dependencies
-        for dependency in deps_to_sync:
-            self.__download_and_apply(dependency)
+        results = []
 
+        if len(deps_to_sync) > 0:
+            log.print_subaction_header("Syncing {count} dependencies".format(count = len(deps_to_sync)))
+            for dependency in deps_to_sync:
+                result = self.__download_and_apply(dependency)
+                results.append(result)
+
+        # Output results
+        log.print_subaction_header("Collating results")
+        self.__output_results(results)
 
     def __diff_to_current(self, dependencies):
         arduino_dir = os.environ["ARDUINO_DIR"]
@@ -38,30 +48,30 @@ class Up(Action):
         if arduino_dir is None:
             log.fatal("No ARDUINO_DIR environment variable set")
 
-        arduino_lib_path = os.join(arduino_dir, "libraries")
+        arduino_lib_path = os.path.join(arduino_dir, "libraries")
 
         current_dir = os.getcwd()
 
         unsynced_dependencies = []
 
-        for depedency in dependencies:
+        for dependency in dependencies:
             # Move to the arduino library directory
             os.chdir(arduino_lib_path)
 
-            dependency_path = Path(os.join(os.getcwd(), dependency.name))
+            dependency_path = Path(os.path.join(os.getcwd(), dependency.name))
 
             # Short-circuit if the path doesn't exist
             if not dependency_path.exists():
-                unsynced_dependencies.append(depedency)
+                unsynced_dependencies.append(dependency)
                 continue
 
             # If it's a directory, we need to check the version
             if dependency_path.is_dir():
                 # Look for the .warm_dependency - file describing the current revision
-                warm_path = os.join(str(dependency_path), ".warm_dependency")
+                warm_path = os.path.join(str(dependency_path), ".warm_dependency")
 
                 if not Path(warm_path).exists():
-                    unsynced_dependencies.append(depedency)
+                    unsynced_dependencies.append(dependency)
                     continue
                 else:
                     # Read in the file to determine revision. This is a data class serialised.
@@ -69,10 +79,10 @@ class Up(Action):
                     # users machine, so if they decide to inject malicious code then it's only 
                     # affecting themselves.
                     with open(warm_path) as warm_properties:
-                        current_dep = eval(warm_properties.read())
+                        current_dep = eval(warm_properties.read().strip())
 
-                        if current_dep is not depedency:
-                            unsynced_dependencies.append(depedency)
+                        if not current_dep == dependency:
+                            unsynced_dependencies.append(dependency)
                             continue
 
         # Back to where we started
@@ -204,15 +214,80 @@ class Up(Action):
         starting_dir = os.getcwd()
 
         with TemporaryDirectory() as tempdir:
-            result = self.__call("git clone {remote} {dir}".format(remote = dependency.git_url, dir = tempdir))
+            result = self.__call("git clone {remote} {dir}".format(remote = dependency.git_url, dir = tempdir), check_result = False)
 
             if result is not 0:
+                os.chdir(starting_dir)
                 return {
                     "success": False,
-                    "reason": "Git clone failed"
+                    "error": "Git clone failed",
+                    "dep_name": dependency.name
                 }
 
-            os.chdir(os.path.join(tempdir, dependency.name))
+            os.chdir(tempdir)
+
+            # Change to the right dependency version
+            if not dependency.version_type == "latest_version":
+                self.__call("git checkout {hash}".format(hash = dependency.version))
+
+            # Parse .warm_properties file - same format as a java/etc .properties file
+            if not Path(".warm_properties").exists():
+                os.chdir(starting_dir)
+                return {
+                    "success": False,
+                    "error": "Warm properties file not found - is this repo set up properly?",
+                    "dep_name": dependency.name
+                }
+
+            # If no src dir property is found, default to the current directory
+            src_dir = "/"
+
+            with open(".warm_properties") as f:
+                for line in f:
+                     # If the line is a comment, skip it
+                    if line.strip().startswith('//'):
+                        continue
+                    
+                    line_split = line.strip().split('=')
+
+                    # If the line is incomplete, skip
+                    if len(line_split) < 2:
+                        continue
+
+                    # Parse the src_dir property
+                    if line_split[0] == "SRC_DIR":
+                        src_dir = line_split[1]
+                        continue
+
+            # Move the src directory to the Arduino libraries path, as well as the generated .warm_dependency file
+            arduino_path = os.environ["ARDUINO_DIR"]
+            dest_path = os.path.join(arduino_path, "libraries/" + dependency.name)
+            src_path = os.path.join(os.getcwd(), src_dir)
+
+            with open(".warm_dependency", "w") as file:
+                file.write(str(dependency))
+
+            try:
+                # Delete the dest path before moving if it exists
+                if Path(dest_path).exists():
+                    shutil.rmtree(dest_path)
+
+                # Make the dir
+                os.makedirs(dest_path)
+
+                # Move files - For the src files we must do one at a time as otherwise we'd create
+                # another SRC_DIR directory within our library
+                for f_name in os.listdir(src_path):
+                    shutil.move(os.path.join(src_path, f_name), dest_path)
+
+                shutil.move(".warm_dependency", dest_path)
+            except OSError as e:
+                os.chdir(starting_dir)
+                return {
+                    "success": False,
+                    "error": "Moving failed. Reason: {error}".format(error = e),
+                    "dep_name": dependency.name
+                }
 
         os.chdir(starting_dir)
 
@@ -220,8 +295,36 @@ class Up(Action):
             "success": True
         }
 
-    def __output_results(self, depresults):
-        print('Done')
+    def __output_results(self, results):
+        successful_results = 0
+        failure_results = []
+
+        for result in results:
+            if result["success"] is not None and result["success"] is True:
+                successful_results = successful_results + 1
+                continue
+            
+            if result["success"] is not None and result["success"] is False:
+                failure_results.append({
+                    "name": result["dep_name"],
+                    "error": result["error"]
+                })
+
+        if len(failure_results) == 0 and successful_results == 0:
+            log.info("Nothing seems to have happened - all dependencies up to date")
+            return
+        
+        if successful_results > 0:
+            log.success("{num_results} dependency updates succeeded".format(num_results = successful_results))
+
+        if len(failure_results) > 0:
+            log.info("")
+            log.warn("Errors occurred for some dependencies:")
+            
+
+        for fail in failure_results:
+            log.warn("{name}: {error}".format(name = fail["name"], error = fail["error"]))
+            
 
     def __call(self, command, check_result = True):
         print("")
