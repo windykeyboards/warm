@@ -3,6 +3,7 @@ from collections import namedtuple
 import log
 import os
 from subprocess import check_output, call
+import subprocess
 from dataclasses import dataclass
 from tempfile import TemporaryDirectory
 from pathlib import Path
@@ -22,24 +23,25 @@ class Up(Action):
     def run(self):
         log.print_action_header("up")
 
+        log.step("Parsing dependencies")
         # Read all dependencies and validate
         all_deps = self.__parse_dependencies()
 
         # Check to see which differ
-        log.print_subaction_header("Diffing dependencies to current")
+        log.step("Diffing dependencies to current")
         deps_to_sync = self.__diff_to_current(all_deps)
 
         # Sync dependencies
         results = []
 
         if len(deps_to_sync) > 0:
-            log.print_subaction_header("Syncing {count} dependencies".format(count = len(deps_to_sync)))
+            log.step("Syncing {count} dependencies".format(count = len(deps_to_sync)))
             for dependency in deps_to_sync:
                 result = self.__download_and_apply(dependency)
                 results.append(result)
 
         # Output results
-        log.print_subaction_header("Collating results")
+        log.step("Collating results")
         self.__output_results(results)
 
     def __diff_to_current(self, dependencies):
@@ -129,7 +131,7 @@ class Up(Action):
                         repo_name = line.strip().split('/')[1].split(':')[0].strip()
                         raw_version = line.strip().split(':')[1].strip()
                     except:
-                        log.info("Malformed dependency on line {line}".format(line = line_number + 1))
+                        log.warn("Malformed dependency on line {line}".format(line = line_number + 1))
                         continue
                     
                     # In future we can support more than just github. For now, hardcode a git https url
@@ -171,9 +173,9 @@ class Up(Action):
         clone_path = os.path.join(resolving_dir, git_name)
 
         header = "Cloning and parsing dependency for {name}".format(name = git_name.replace('.git', ''))
-        log.print_subaction_header(header)
+        log.info(header)
 
-        result = self.__call("git clone --bare {url} {temp_path}".format(url = remote_url, temp_path = clone_path), check_result = False)
+        result = self.__call("git clone --bare {url} {temp_path} &> /dev/null".format(url = remote_url, temp_path = clone_path), check_result = False)
 
         if result is not 0:
             log.warn("No valid repo found at {remote}. Does it look right? Are you connected to the internet?".format(remote = remote_url))
@@ -220,7 +222,7 @@ class Up(Action):
         starting_dir = os.getcwd()
 
         with TemporaryDirectory() as tempdir:
-            result = self.__call("git clone {remote} {dir}".format(remote = dependency.git_url, dir = tempdir), check_result = False)
+            result = self.__call("git clone {remote} {dir} &> /dev/null".format(remote = dependency.git_url, dir = tempdir), check_result = False)
 
             if result is not 0:
                 os.chdir(starting_dir)
@@ -335,11 +337,9 @@ class Up(Action):
 
     def __call(self, command, check_result = True):
         """Util function for calling commands and printing them nicely"""
-        print("")
         log.command(command)
-        print("")
 
         if check_result:
             return check_output(command, shell = True).decode('utf-8')
         else:
-            return call(command, shell = True)
+            return call(command, stdout=subprocess.DEVNULL, shell = True)
