@@ -7,8 +7,8 @@
 # repositories. For more information around the operation of Warm, see the 
 # associated wiki pages.
 
-# No argparse for now - only have two options
 from os import sys
+import os
 
 help_message = """
 Usage: 
@@ -22,6 +22,11 @@ if len(sys.argv) < 2:
     quit()
 
 action = None
+
+if "-v" in sys.argv or "--verbose" in sys.argv:
+    os.environ["WARM_VERBOSE_LOGGING"] = str(1)
+else:
+    os.environ["WARM_VERBOSE_LOGGING"] = str(0)
 
 # Parse the actions
 if sys.argv[1] == 'up':
