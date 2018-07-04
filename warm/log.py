@@ -37,10 +37,3 @@ def print_action_header(action_name):
                 Starting to warm {action_name}                
 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
     """.format(action_name = action_name))
-
-def print_subaction_header(text):
-    print(
-"""
-{text}
------------------------------------------------""".format(text = text)
-    )

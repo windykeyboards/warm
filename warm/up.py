@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from tempfile import TemporaryDirectory
 from pathlib import Path
 import shutil
+import multiprocessing
 
 @dataclass
 class Dependency:
@@ -16,6 +17,10 @@ class Dependency:
     git_url: str 
     version_type: str
     version: str
+
+def unwrap_download(arg, **kwarg):
+    """Function unwrapping a class member function for use with `pool.map`"""
+    return Up.download_and_apply(*arg, **kwarg)
 
 # Class defining the up action
 class Up(Action):
@@ -36,12 +41,12 @@ class Up(Action):
 
         if len(deps_to_sync) > 0:
             log.step("Syncing {count} dependencies".format(count = len(deps_to_sync)))
-            for dependency in deps_to_sync:
-                result = self.__download_and_apply(dependency)
-                results.append(result)
+            with multiprocessing.Pool(processes=4) as pool:
+                results = pool.map(unwrap_download, zip([self]*len(deps_to_sync), deps_to_sync,))
 
         # Output results
         log.step("Collating results")
+        print("")
         self.__output_results(results)
 
     def __diff_to_current(self, dependencies):
@@ -175,7 +180,7 @@ class Up(Action):
         header = "Cloning and parsing dependency for {name}".format(name = git_name.replace('.git', ''))
         log.info(header)
 
-        result = self.__call("git clone --bare {url} {temp_path} &> /dev/null".format(url = remote_url, temp_path = clone_path), check_result = False)
+        result = self.__call("git clone --bare {url} {temp_path}".format(url = remote_url, temp_path = clone_path), check_result = False)
 
         if result is not 0:
             log.warn("No valid repo found at {remote}. Does it look right? Are you connected to the internet?".format(remote = remote_url))
@@ -196,7 +201,7 @@ class Up(Action):
             }
 
         # Check for branch
-        out = self.__call("git branch").split('\n')
+        out = self.__call("git branch", print_out = True).split('\n')
 
         # Remove selected branch prefix
         mapped_output = list(map(lambda branch: branch.replace("*", "").strip(), out))
@@ -217,12 +222,12 @@ class Up(Action):
 
         return None
 
-    def __download_and_apply(self, dependency):
+    def download_and_apply(self, dependency):
         """Downloads the input dependency and moves it to the ARDUINO_DIR"""
         starting_dir = os.getcwd()
 
         with TemporaryDirectory() as tempdir:
-            result = self.__call("git clone {remote} {dir} &> /dev/null".format(remote = dependency.git_url, dir = tempdir), check_result = False)
+            result = self.__call("git clone {remote} {dir}".format(remote = dependency.git_url, dir = tempdir), check_result = False)
 
             if result is not 0:
                 os.chdir(starting_dir)
@@ -309,6 +314,13 @@ class Up(Action):
         failure_results = []
 
         for result in results:
+            if result is None:
+                failure_results.append({
+                    "name": "RIP",
+                    "error": "None result type"
+                })
+                continue
+
             if result["success"] is not None and result["success"] is True:
                 successful_results = successful_results + 1
                 continue
@@ -320,7 +332,7 @@ class Up(Action):
                 })
 
         if len(failure_results) == 0 and successful_results == 0:
-            log.info("Nothing seems to have happened - all dependencies up to date")
+            log.success("Everything up to date")
             return
         
         if successful_results > 0:
@@ -335,9 +347,12 @@ class Up(Action):
             log.warn("{name}: {error}".format(name = fail["name"], error = fail["error"]))
             
 
-    def __call(self, command, check_result = True):
+    def __call(self, command, check_result = True, print_out = False):
         """Util function for calling commands and printing them nicely"""
         log.command(command)
+
+        if not int(os.environ["WARM_VERBOSE_LOGGING"]) and not print_out:
+            command = command + " &> /dev/null"
 
         if check_result:
             return check_output(command, shell = True).decode('utf-8')
