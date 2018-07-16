@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from tempfile import TemporaryDirectory
 from pathlib import Path
 import shutil
-import multiprocessing
+from sys import platform
 
 @dataclass
 class Dependency:
@@ -17,10 +17,7 @@ class Dependency:
     git_url: str 
     version_type: str
     version: str
-
-def unwrap_download(arg, **kwarg):
-    """Function unwrapping a class member function for use with `pool.map`"""
-    return Up.download_and_apply(*arg, **kwarg)
+    current_hash: str
 
 # Class defining the up action
 class Up(Action):
@@ -29,6 +26,7 @@ class Up(Action):
         log.print_action_header("up")
 
         log.step("Parsing dependencies")
+
         # Read all dependencies and validate
         all_deps = self.__parse_dependencies()
 
@@ -41,8 +39,8 @@ class Up(Action):
 
         if len(deps_to_sync) > 0:
             log.step("Syncing {count} dependencies".format(count = len(deps_to_sync)))
-            with multiprocessing.Pool(processes=4) as pool:
-                results = pool.map(unwrap_download, zip([self]*len(deps_to_sync), deps_to_sync,))
+            for dep in deps_to_sync:
+                self.download_and_apply(dep)
 
         # Output results
         log.step("Collating results")
@@ -117,46 +115,51 @@ class Up(Action):
 
         # Use a temporary directory as the outer completion such that we use the same directory for all
         # git repo resolutions
-        with TemporaryDirectory() as tempdir:
-            with open(dep_file) as f:
-                for line_number, line in enumerate(f):
-                    # If the line is a comment, skip it
-                    if line.strip().startswith('//'):
-                        continue
+        try:
+            with TemporaryDirectory() as tempdir:
+                with open(dep_file) as f:
+                    for line_number, line in enumerate(f):
+                        # If the line is a comment, skip it
+                        if line.strip().startswith('//'):
+                            continue
 
-                    # The format of a dependency is as follows:
-                    #
-                    #                   windykeyboards/butt-in: 1.0
-                    # [org or owner name] / [repo name] : [tag | commit hash | branch | plus] 
-                    #
-                    # The following reads each dependency, detects version type, and constructs a 
-                    # named tuple describing the dependency.
-                    try:
-                        owner = line.strip().split('/')[0]
-                        repo_name = line.strip().split('/')[1].split(':')[0].strip()
-                        raw_version = line.strip().split(':')[1].strip()
-                    except:
-                        log.warn("Malformed dependency on line {line}".format(line = line_number + 1))
-                        continue
-                    
-                    # In future we can support more than just github. For now, hardcode a git https url
-                    git_url = "https://github.com/{owner}/{repo}.git".format(owner = owner, repo = repo_name)
+                        # The format of a dependency is as follows:
+                        #
+                        #                   windykeyboards/butt-in: 1.0
+                        # [org or owner name] / [repo name] : [tag | commit hash | branch | plus] 
+                        #
+                        # The following reads each dependency, detects version type, and constructs a 
+                        # named tuple describing the dependency.
+                        try:
+                            owner = line.strip().split('/')[0]
+                            repo_name = line.strip().split('/')[1].split(':')[0].strip()
+                            raw_version = line.strip().split(':')[1].strip()
+                        except:
+                            log.warn("Malformed dependency on line {line}".format(line = line_number + 1))
+                            continue
+                        
+                        # In future we can support more than just github. For now, hardcode a git https url
+                        git_url = "https://github.com/{owner}/{repo}.git".format(owner = owner, repo = repo_name)
 
-                    parsed_version = self.__parse_version(git_url, raw_version, tempdir)
+                        parsed_version = self.__parse_version(git_url, raw_version, tempdir)
 
-                    if parsed_version is None:
-                        log.warn("Malformed version on line {line}".format(line = line_number + 1))
-                        continue
+                        if parsed_version is None:
+                            log.warn("Malformed version on line {line}".format(line = line_number + 1))
+                            continue
 
-                    version_type = parsed_version["type"]
-                    version = parsed_version["version"]
+                        version_type = parsed_version["type"]
+                        version = parsed_version["version"]
+                        commit_hash = parsed_version["commit_hash"]
 
-                    all_deps.append(Dependency(
-                        name = repo_name,
-                        git_url = git_url,
-                        version_type = version_type,
-                        version = version
-                    ))
+                        all_deps.append(Dependency(
+                            name = repo_name,
+                            git_url = git_url,
+                            version_type = version_type,
+                            version = version,
+                            current_hash = commit_hash
+                        ))
+        except PermissionError as e:
+            log.warn("Deletion of tempdir failed - this is not a problem, likely a Windows issue")
                 
         # Change back to the original working directory in case parsing changed the working dir
         os.chdir(current_working_dir)
@@ -170,7 +173,8 @@ class Up(Action):
         if '+' in raw_version:
             return {
                 "type": "latest_version",
-                "version": "+"
+                "version": "+",
+                "commit_hash": self.__call("git rev-parse HEAD")
             }
 
         # Clone a bare copy of the repo, allowing us to scan commits, tags and branches
@@ -197,7 +201,8 @@ class Up(Action):
         if version in out:
             return {
                 "type": "commit",
-                "version": version
+                "version": version,
+                "commit_hash": version
             }
 
         # Check for branch
@@ -207,9 +212,13 @@ class Up(Action):
         mapped_output = list(map(lambda branch: branch.replace("*", "").strip(), out))
 
         if version in mapped_output:
+            # Get commit hash on branch
+            commit_hash = self.__call("git show-ref refs/remotes/origin/{branch} --hash".format(branch = version))
+
             return {
                 "type": "branch",
-                "version": version
+                "version": version,
+                "commit_hash": commit_hash
             }
 
         # Check for tag
@@ -217,7 +226,8 @@ class Up(Action):
         if version in out:
             return {
                 "type": "tag",
-                "version": version
+                "version": version,
+                "commit_hash": "Turns out commit hashes don't matter for tags"
             }
 
         return None
@@ -352,7 +362,10 @@ class Up(Action):
         log.command(command)
 
         if not int(os.environ["WARM_VERBOSE_LOGGING"]) and not print_out:
-            command = command + " &> /dev/null"
+            if platform == "win32":
+                command = command + " > $null"
+            else:
+                command = command + " &> /dev/null"
 
         if check_result:
             return check_output(command, shell = True).decode('utf-8')

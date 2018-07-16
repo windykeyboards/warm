@@ -4,7 +4,7 @@ from action import Action
 class This(Action):
 
     def run(self):
-        print "This run"
+        print "Running \"this\""
 
     def __find_src_dir(self):
         # TODO - Find lowest level directory containing .cpp or .h files

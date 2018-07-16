@@ -13,7 +13,6 @@ import os
 help_message = """
 Usage: 
     warm up      - Updates the dependencies of the current project
-    warm this    - Attempts to turn this directory into a warm library format
 """
 
 # We expect 2 - one for the name, one for the action to take
