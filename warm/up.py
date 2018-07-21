@@ -251,41 +251,36 @@ class Up(Action):
 
             # Change to the right dependency version
             if not dependency.version_type == "latest_version":
-                self.__call("git checkout {hash}".format(hash = dependency.version))
-
-            # Parse .warm_properties file - same format as a java/etc .properties file
-            if not Path(".warm_properties").exists():
-                os.chdir(starting_dir)
-                return {
-                    "success": False,
-                    "error": "Warm properties file not found - is this repo set up properly?",
-                    "dep_name": dependency.name
-                }
+                if dependency.version_type is not "tag":
+                    self.__call("git checkout {hash}".format(hash = dependency.version))
+                else:
+                    self.__call("git checkout tags/{hash}".format(hash = dependency.version))
 
             # If no src dir property is found, default to the current directory
-            src_dir = "/"
+            src_dir = ""
 
-            with open(".warm_properties") as f:
-                for line in f:
-                     # If the line is a comment, skip it
-                    if line.strip().startswith('//'):
-                        continue
-                    
-                    line_split = line.strip().split('=')
+            if Path(".warm_properties").exists():
+                with open(".warm_properties") as f:
+                    for line in f:
+                        # If the line is a comment, skip it
+                        if line.strip().startswith('//'):
+                            continue
+                        
+                        line_split = line.strip().split('=')
 
-                    # If the line is incomplete, skip
-                    if len(line_split) < 2:
-                        continue
+                        # If the line is incomplete, skip
+                        if len(line_split) < 2:
+                            continue
 
-                    # Parse the src_dir property
-                    if line_split[0] == "SRC_DIR":
-                        src_dir = line_split[1]
-                        continue
+                        # Parse the src_dir property
+                        if line_split[0] == "SRC_DIR":
+                            src_dir = line_split[1]
+                            continue
 
             # Move the src directory to the Arduino libraries path, as well as the generated .warm_dependency file
             arduino_path = os.environ["ARDUINO_DIR"]
             dest_path = os.path.join(arduino_path, "libraries/" + dependency.name)
-            src_path = os.path.join(os.getcwd(), src_dir)
+            src_path = os.path.join(tempdir, src_dir)
 
             with open(".warm_dependency", "w") as file:
                 file.write(str(dependency))
