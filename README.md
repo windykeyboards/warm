@@ -1,6 +1,8 @@
 # Warm
 **W**indy keyboards **AR**duino package **M**anager
 
+Note: Warm is now deprecated. This was useful 2 years ago, but with improvements made to PlatformIO with their library crawler, this is now not needed. 
+
 Warm is a Github-based package manager, promoting Arduino Development for your average hipster software developer. It's based on Python 3.7, so you best be up to date son.
 
 ## How to install
